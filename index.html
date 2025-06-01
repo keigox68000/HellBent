@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Helmet Game Prototype</title>
+    <title>ヘルベント</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -36,16 +36,12 @@
             font-weight: bold;
             color: #e0e0e0; /* Lighter text for score */
         }
-        #gameOverMessage {
-            margin-top: 20px; /* More space above game over message */
-            font-size: 1.5em; /* Larger game over text */
-            color: #ff4444; /* Brighter red for game over */
-            font-weight: bold;
+        #gameOverMessage { 
+            margin-top: 15px;
         }
         #gameOverMessage button {
-            margin-top: 15px; /* More space above button */
-            padding: 12px 24px; /* Larger button */
-            font-size: 1.1em; /* Larger button text */
+            padding: 12px 24px;
+            font-size: 1.1em;
             color: white;
             background-color: #007bff;
             border: none;
@@ -56,25 +52,20 @@
         #gameOverMessage button:hover {
             background-color: #0056b3;
         }
-        .instructions {
-            margin-top: 20px; /* More space above instructions */
-            font-size: 1em; /* Slightly larger instructions text */
-            color: #bbb; /* Lighter grey for instructions */
+        .instructions { 
+            margin-top: 20px; 
+            font-size: 1em; 
+            color: #bbb; 
         }
     </style>
 </head>
 <body>
     <div id="game-container">
-        <div id="score">スコア: 0</div>
-        <canvas id="gameCanvas"></canvas>
-        <div id="gameOverMessage" style="display:none;">
-            ゲームオーバー!
+        <div id="score">スコア: 0</div> <canvas id="gameCanvas"></canvas>
+        <div id="gameOverMessage" style="display:none;"> 
             <button id="restartButton">リスタート</button>
         </div>
-        <div class="instructions">
-            矢印キー (← →) で移動
-        </div>
-    </div>
+        <div id="instructions" class="instructions">矢印キー (← →) で移動</div> </div>
 
     <script>
         // --- Game Configuration ---
@@ -84,17 +75,20 @@
 
         const PLAYER_WIDTH = 70; 
         const PLAYER_HEIGHT = 100; 
-        const PLAYER_Y_OFFSET = 5; // Adjusted offset from the ground line base
+        const PLAYER_Y_OFFSET = 5; 
+        const PLAYER_HITBOX_BOTTOM_REDUCTION_PERCENT = 0.25; 
 
         const OBSTACLE_WIDTH = 80; 
         const OBSTACLE_HEIGHT = 80; 
         const OBSTACLE_ROTATION_SPEED = 0.04; 
-        const OBSTACLE_SPEED_VARIATION = 0.2; // Max 20% variation (+/- 10%)
+        const OBSTACLE_SPEED_VARIATION = 0.6; 
 
         const HOUSE_WIDTH = 100; 
         const HOUSE_HEIGHT = 140; 
+        const GOAL_HOUSE_WIDTH = HOUSE_WIDTH * 1.2 * 1.2; 
+        const GOAL_HOUSE_HEIGHT = HOUSE_HEIGHT * 1.2 * 1.2;
 
-        const GROUND_LINE_BASE_Y = CANVAS_HEIGHT - 15; // Base Y for ground line, slightly higher
+        const GROUND_LINE_BASE_Y = CANVAS_HEIGHT - 15; 
         const GROUND_LINE_AMPLITUDE = 4; 
         const GROUND_LINE_SEGMENT_LENGTH = 25; 
 
@@ -116,7 +110,6 @@
         // --- Game State Variables ---
         let canvas, ctx;
         let score;
-        let gameOver;
         let player;
         let obstacles;
         let images = {};
@@ -124,20 +117,49 @@
         let totalImages = Object.keys(IMAGE_SOURCES).length;
 
         let playerPositionsX = []; 
-        let groundLinePoints = []; // To store the static ground line points
+        let groundLinePoints = []; 
 
-        let baseObstacleSpeed;
-        let currentObstacleSpeed; // This will be the base for individual speeds
-        let baseSpawnInterval;
-        let currentSpawnInterval;
+        let initialBaseObstacleSpeed;
+        let baseObstacleSpeed;     
+        let currentObstacleSpeed;  
+
+        let initialBaseSpawnInterval;
+        let baseSpawnInterval;       
+        let currentSpawnInterval;    
+        
         let lastSpawnTime;
-        let minSpawnInterval = 350; 
-        let maxSimultaneousSpawns;
+        let minSpawnInterval = 300; 
+        
+        let initialMaxSimultaneousSpawns;
+        let baseMaxSimultaneousSpawns;   
+        let maxSimultaneousSpawns;       
 
-        let isDamaged;
+        let gameStartTime; 
+        let lastDifficultyIncreaseTime;
+        const TIME_DIFFICULTY_INTERVAL = 15000; 
+        const TIME_SPEED_INCREASE = 0.05;       
+        const TIME_SPAWN_DECREASE = 50;         
+        const TIME_MAX_SPAWN_INCREASE_INTERVAL = 45000; 
+        let lastMaxSpawnIncreaseTime;
+
+        let isDamaged; 
         let damageFlashStart;
         const DAMAGE_FLASH_DURATION = 1000; 
         const DAMAGE_BLINK_INTERVAL = 100; 
+
+        let isCelebrating = false; 
+        const CELEBRATION_DURATION = 800; 
+        const CELEBRATION_BLINK_INTERVAL = 100; 
+
+        let gameState = 'title'; 
+        let gameOverTransitionTimer = 0; 
+        const GAME_OVER_TEXT_DISPLAY_DURATION = 3000; 
+
+        let demoPlayer = { x: -PLAYER_WIDTH, y: 0, speed: 2, imageToggle: false, currentImage: null };
+        const DEMO_PLAYER_MIN_SPEED = 1.5;
+        const DEMO_PLAYER_MAX_SPEED = 4;
+        let demoPlayerAnimationTimer = 0;
+        const DEMO_PLAYER_ANIMATION_INTERVAL = 150; 
 
         // --- Initialization ---
         window.onload = function() {
@@ -146,13 +168,16 @@
             canvas.width = CANVAS_WIDTH;
             canvas.height = CANVAS_HEIGHT;
 
-            document.getElementById('restartButton').addEventListener('click', initGame);
+            document.getElementById('restartButton').addEventListener('click', () => {
+                gameState = 'title'; 
+            });
             
             for (let i = 0; i < 7; i++) {
                 const laneCenterX = (i * LANE_WIDTH) + (LANE_WIDTH / 2);
                 playerPositionsX.push(laneCenterX - PLAYER_WIDTH / 2);
             }
             
+            generateStaticGroundLine(); 
             loadImages();
         };
 
@@ -172,38 +197,37 @@
                 images[key].onload = () => {
                     imagesLoaded++;
                     if (imagesLoaded === totalImages) {
-                        initGame(); 
+                        demoPlayer.currentImage = images.player1; 
+                        gameLoop(); 
                     }
                 };
                 images[key].onerror = function() {
                     console.warn(`Failed to load image: ${IMAGE_SOURCES[key]}. Using placeholder.`);
                     let w = PLAYER_WIDTH, h = PLAYER_HEIGHT; 
-                    if (key.includes("House")) { w = HOUSE_WIDTH; h = HOUSE_HEIGHT; }
+                    if (key === "goalHouse") { w = GOAL_HOUSE_WIDTH; h = GOAL_HOUSE_HEIGHT;}
+                    else if (key.includes("House")) { w = HOUSE_WIDTH; h = HOUSE_HEIGHT; }
                     else if (key.includes("obstacle")) { w = OBSTACLE_WIDTH; h = OBSTACLE_HEIGHT; } 
                     
                     this.src = `${PLACEHOLDER_URL}${w}x${h}/000000/ffffff?text=${key.substring(0,1).toUpperCase()}`; 
                     imagesLoaded++; 
                     if (imagesLoaded === totalImages) {
-                        initGame();
+                        demoPlayer.currentImage = images.player1;
+                        gameLoop();
                     }
                 };
                 images[key].src = IMAGE_BASE_URL + IMAGE_SOURCES[key];
             }
         }
 
-        function initGame() {
+        function initGame() { 
             score = 0;
-            gameOver = false;
-            isDamaged = false;
+            isDamaged = false; 
+            isCelebrating = false;
             document.getElementById('score').textContent = 'スコア: 0';
-            document.getElementById('gameOverMessage').style.display = 'none';
-
-            generateStaticGroundLine(); // Generate ground line once
 
             player = {
                 positionIndex: 0, 
                 x: playerPositionsX[0],
-                // Player Y position is set relative to the ground's base Y
                 y: GROUND_LINE_BASE_Y - PLAYER_HEIGHT - PLAYER_Y_OFFSET, 
                 width: PLAYER_WIDTH,
                 height: PLAYER_HEIGHT,
@@ -211,23 +235,53 @@
                 currentImage: images.player1
             };
 
-            obstacles = [];
-            baseObstacleSpeed = 2.0; 
-            currentObstacleSpeed = baseObstacleSpeed; // This is the *base* for varied speeds
-            baseSpawnInterval = 1700; 
-            currentSpawnInterval = baseSpawnInterval;
-            lastSpawnTime = 0;
-            maxSimultaneousSpawns = 1;
+            obstacles = []; 
+            
+            initialBaseObstacleSpeed = 2.0;
+            baseObstacleSpeed = initialBaseObstacleSpeed;
+            currentObstacleSpeed = baseObstacleSpeed; 
 
-            if (gameLoopRequestId) { 
-                cancelAnimationFrame(gameLoopRequestId);
+            initialBaseSpawnInterval = 1700;
+            baseSpawnInterval = initialBaseSpawnInterval;
+            currentSpawnInterval = baseSpawnInterval;
+            
+            lastSpawnTime = Date.now(); 
+
+            initialMaxSimultaneousSpawns = 1;
+            baseMaxSimultaneousSpawns = initialMaxSimultaneousSpawns;
+            maxSimultaneousSpawns = baseMaxSimultaneousSpawns;
+
+            gameStartTime = Date.now();
+            lastDifficultyIncreaseTime = gameStartTime;
+            lastMaxSpawnIncreaseTime = gameStartTime;
+
+            gameState = 'playing'; 
+        }
+
+        function updateDifficultyBasedOnTime() {
+            const now = Date.now();
+            if (now - lastDifficultyIncreaseTime > TIME_DIFFICULTY_INTERVAL) {
+                baseObstacleSpeed += TIME_SPEED_INCREASE;
+                baseSpawnInterval = Math.max(minSpawnInterval + 200, baseSpawnInterval - TIME_SPAWN_DECREASE); 
+                lastDifficultyIncreaseTime = now;
             }
-            gameLoop();
+
+            if (now - lastMaxSpawnIncreaseTime > TIME_MAX_SPAWN_INCREASE_INTERVAL) {
+                 baseMaxSimultaneousSpawns = Math.min(3, baseMaxSimultaneousSpawns + 1); 
+                 lastMaxSpawnIncreaseTime = now;
+            }
+
+            currentObstacleSpeed = baseObstacleSpeed + (score * 0.2); 
+            currentSpawnInterval = Math.max(minSpawnInterval, baseSpawnInterval - (score * 70)); 
+            maxSimultaneousSpawns = baseMaxSimultaneousSpawns;
+            if (score > 0 && score % 3 === 0) { 
+                maxSimultaneousSpawns = Math.min(4, baseMaxSimultaneousSpawns + 1); 
+            }
         }
 
         // --- Player Logic ---
         function movePlayer(direction) {
-            if (gameOver) return;
+            if (isCelebrating) return; 
 
             const newPosIndex = player.positionIndex + direction;
             if (newPosIndex >= 0 && newPosIndex < 7) {
@@ -236,57 +290,60 @@
                 player.imageToggle = !player.imageToggle;
                 player.currentImage = player.imageToggle ? images.player2 : images.player1;
 
-                if (player.positionIndex === 6) {
-                    score++;
-                    document.getElementById('score').textContent = 'スコア: ' + score;
-                    player.positionIndex = 0; 
-                    player.x = playerPositionsX[0];
-                    
-                    // currentObstacleSpeed still increases, affecting the base for new obstacles
-                    currentObstacleSpeed = baseObstacleSpeed + (score * 0.2); 
-                    currentSpawnInterval = Math.max(minSpawnInterval, baseSpawnInterval - (score * 70)); 
-                    if (score > 0 && score % 3 === 0) { 
-                        maxSimultaneousSpawns = Math.min(4, maxSimultaneousSpawns + 1); 
-                    }
+                if (player.positionIndex === 6) { 
+                    startCelebration();
                 }
             }
         }
 
+        function startCelebration() {
+            isCelebrating = true;
+            let celebrationStartTime = Date.now();
+
+            function celebrationAnimation() {
+                const elapsed = Date.now() - celebrationStartTime;
+
+                if (elapsed < CELEBRATION_DURATION) {
+                    if (Math.floor(elapsed / CELEBRATION_BLINK_INTERVAL) % 2 === 0) {
+                        player.currentImage = images.player1;
+                    } else {
+                        player.currentImage = images.player2;
+                    }
+                    requestAnimationFrame(celebrationAnimation); 
+                } else {
+                    isCelebrating = false;
+                    score++;
+                    document.getElementById('score').textContent = 'スコア: ' + score;
+                    player.positionIndex = 0; 
+                    player.x = playerPositionsX[0];
+                    player.currentImage = images.player1; 
+                }
+            }
+            celebrationAnimation(); 
+        }
+
         // --- Obstacle Logic ---
         function spawnObstacles() {
-            const now = Date.now();
-            if (now - lastSpawnTime > currentSpawnInterval) {
-                lastSpawnTime = now;
+            if (isCelebrating) return; 
 
+            const now = Date.now();
+            if (now - lastSpawnTime > currentSpawnInterval) { 
+                lastSpawnTime = now;
                 let spawnedThisTick = 0;
                 const lanesAttempted = new Set(); 
-
-                for (let i = 0; i < maxSimultaneousSpawns; i++) {
+                for (let i = 0; i < maxSimultaneousSpawns; i++) { 
                     if (spawnedThisTick >= maxSimultaneousSpawns) break;
-
                     const obstacleLanePlayerIndex = 1 + Math.floor(Math.random() * 5); 
                     if (lanesAttempted.has(obstacleLanePlayerIndex)) continue; 
-
                     lanesAttempted.add(obstacleLanePlayerIndex);
-                    
                     const obstacleImageKey = `obstacle${obstacleLanePlayerIndex}`;
                     const obstacleImage = images[obstacleImageKey];
-                                        
                     const obstacleX = playerPositionsX[obstacleLanePlayerIndex] + (PLAYER_WIDTH / 2) - (OBSTACLE_WIDTH / 2);
-                    
-                    // Assign individual speed with variation
                     const speedMultiplier = 1 + (Math.random() - 0.5) * OBSTACLE_SPEED_VARIATION;
                     const individualSpeed = currentObstacleSpeed * speedMultiplier;
-
                     obstacles.push({
-                        x: obstacleX,
-                        y: -OBSTACLE_HEIGHT, 
-                        width: OBSTACLE_WIDTH, 
-                        height: OBSTACLE_HEIGHT, 
-                        image: obstacleImage,
-                        angle: 0,
-                        laneIndex: obstacleLanePlayerIndex,
-                        speed: individualSpeed // Store individual speed
+                        x: obstacleX, y: -OBSTACLE_HEIGHT, width: OBSTACLE_WIDTH, height: OBSTACLE_HEIGHT, 
+                        image: obstacleImage, angle: 0, laneIndex: obstacleLanePlayerIndex, speed: individualSpeed 
                     });
                     spawnedThisTick++;
                 }
@@ -294,11 +351,11 @@
         }
 
         function updateObstacles() {
+            if (isCelebrating) return; 
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 const obs = obstacles[i];
-                obs.y += obs.speed; // Use individual speed
+                obs.y += obs.speed; 
                 obs.angle += OBSTACLE_ROTATION_SPEED;
-
                 if (obs.y > CANVAS_HEIGHT) {
                     obstacles.splice(i, 1);
                 }
@@ -307,25 +364,23 @@
 
         // --- Collision Detection ---
         function checkCollisions() {
+            if (isCelebrating) return; 
             for (const obs of obstacles) {
                 const playerLeft = player.x;
                 const playerRight = player.x + player.width;
-                const playerTop = player.y;
-                const playerBottom = player.y + player.height;
-
+                const playerTop = player.y; 
+                const playerEffectiveHeight = player.height * (1 - PLAYER_HITBOX_BOTTOM_REDUCTION_PERCENT);
+                const playerCollisionBottom = player.y + playerEffectiveHeight; 
                 const obsLeft = obs.x;
                 const obsRight = obs.x + obs.width; 
                 const obsTop = obs.y;
                 const obsBottom = obs.y + obs.height; 
-
-                if (playerRight > obsLeft && playerLeft < obsRight &&
-                    playerBottom > obsTop && playerTop < obsBottom) {
-                    
+                if (playerRight > obsLeft && playerLeft < obsRight && playerCollisionBottom > obsTop && playerTop < obsBottom) {          
                     if (obs.laneIndex === player.positionIndex) {
-                        gameOver = true;
-                        isDamaged = true;
-                        damageFlashStart = Date.now();
-                        document.getElementById('gameOverMessage').style.display = 'block';
+                        gameState = 'gameOver'; 
+                        isDamaged = true; 
+                        damageFlashStart = Date.now(); 
+                        gameOverTransitionTimer = Date.now(); 
                         return; 
                     }
                 }
@@ -334,7 +389,7 @@
         
         // --- Drawing Ground ---
         function drawGround() {
-            if (groundLinePoints.length === 0) return; // Don't draw if not generated
+            if (groundLinePoints.length === 0) return; 
 
             ctx.beginPath();
             ctx.moveTo(groundLinePoints[0].x, groundLinePoints[0].y);
@@ -346,99 +401,150 @@
             ctx.stroke();
         }
 
+        // --- Drawing Functions per Game State ---
+        function drawTitleScreen() {
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            drawGround(); 
 
-        // --- Drawing ---
-        function draw() {
+            demoPlayer.x += demoPlayer.speed;
+            demoPlayerAnimationTimer += 16; 
+            if(demoPlayerAnimationTimer >= DEMO_PLAYER_ANIMATION_INTERVAL) {
+                demoPlayer.imageToggle = !demoPlayer.imageToggle;
+                demoPlayer.currentImage = demoPlayer.imageToggle ? images.player2 : images.player1;
+                demoPlayerAnimationTimer = 0;
+            }
+
+            if (demoPlayer.x > CANVAS_WIDTH) {
+                demoPlayer.x = -PLAYER_WIDTH; 
+                demoPlayer.speed = DEMO_PLAYER_MIN_SPEED + Math.random() * (DEMO_PLAYER_MAX_SPEED - DEMO_PLAYER_MIN_SPEED);
+            }
+            demoPlayer.y = GROUND_LINE_BASE_Y - PLAYER_HEIGHT - PLAYER_Y_OFFSET;
+            if (demoPlayer.currentImage && demoPlayer.currentImage.complete && demoPlayer.currentImage.naturalHeight !== 0) {
+                 ctx.drawImage(demoPlayer.currentImage, demoPlayer.x, demoPlayer.y, PLAYER_WIDTH, PLAYER_HEIGHT);
+            }
+
+            ctx.fillStyle = "white";
+            ctx.font = "bold 72px 'Arial', sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("ヘルベント", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40);
+            
+            ctx.font = "36px 'Arial', sans-serif";
+            ctx.fillText("PUSH ANY KEY", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
+        }
+
+        function drawPlayingScreen() { 
             ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
             const startHouseX = playerPositionsX[0] + (PLAYER_WIDTH / 2) - (HOUSE_WIDTH / 2);
-            const startHouseY = GROUND_LINE_BASE_Y - HOUSE_HEIGHT; // Position relative to base ground line
+            const startHouseY = GROUND_LINE_BASE_Y - HOUSE_HEIGHT; 
             if (images.startHouse && images.startHouse.complete && images.startHouse.naturalHeight !== 0) {
                  ctx.drawImage(images.startHouse, startHouseX, startHouseY, HOUSE_WIDTH, HOUSE_HEIGHT);
             } else {
-                ctx.fillStyle = 'darkgreen'; 
-                ctx.fillRect(startHouseX, startHouseY, HOUSE_WIDTH, HOUSE_HEIGHT);
-                ctx.fillStyle = 'white';
-                ctx.fillText("S", startHouseX + HOUSE_WIDTH/2 - 10, startHouseY + HOUSE_HEIGHT/2 + 10); 
+                ctx.fillStyle = 'darkgreen'; ctx.fillRect(startHouseX, startHouseY, HOUSE_WIDTH, HOUSE_HEIGHT);
+                ctx.fillStyle = 'white'; ctx.fillText("S", startHouseX + HOUSE_WIDTH/2 - 10, startHouseY + HOUSE_HEIGHT/2 + 10); 
             }
 
-            const goalHouseX = playerPositionsX[6] + (PLAYER_WIDTH / 2) - (HOUSE_WIDTH / 2);
-            const goalHouseY = GROUND_LINE_BASE_Y - HOUSE_HEIGHT; // Position relative to base ground line
+            const goalHouseDrawX = playerPositionsX[6] + (LANE_WIDTH / 2) - (GOAL_HOUSE_WIDTH / 2); 
+            const goalHouseDrawY = GROUND_LINE_BASE_Y - GOAL_HOUSE_HEIGHT; 
              if (images.goalHouse && images.goalHouse.complete && images.goalHouse.naturalHeight !== 0) {
-                ctx.drawImage(images.goalHouse, goalHouseX, goalHouseY, HOUSE_WIDTH, HOUSE_HEIGHT);
+                ctx.drawImage(images.goalHouse, goalHouseDrawX, goalHouseDrawY, GOAL_HOUSE_WIDTH, GOAL_HOUSE_HEIGHT);
             } else {
-                ctx.fillStyle = 'darkblue'; 
-                ctx.fillRect(goalHouseX, goalHouseY, HOUSE_WIDTH, HOUSE_HEIGHT);
-                ctx.fillStyle = 'white';
-                ctx.fillText("G", goalHouseX + HOUSE_WIDTH/2 - 10, goalHouseY + HOUSE_HEIGHT/2 + 10); 
+                ctx.fillStyle = 'darkblue'; ctx.fillRect(goalHouseDrawX, goalHouseDrawY, GOAL_HOUSE_WIDTH, GOAL_HOUSE_HEIGHT);
+                ctx.fillStyle = 'white'; ctx.fillText("G", goalHouseDrawX + GOAL_HOUSE_WIDTH/2 - 10, goalHouseDrawY + GOAL_HOUSE_HEIGHT/2 + 10); 
             }
             
-            // Player Y is set in initGame and doesn't need per-frame adjustment if ground is static
-            // player.y = GROUND_LINE_BASE_Y - PLAYER_HEIGHT - PLAYER_Y_OFFSET; 
-
-            if (player.currentImage && player.currentImage.complete && player.currentImage.naturalHeight !== 0) {
-                ctx.drawImage(player.currentImage, player.x, player.y, player.width, player.height);
-            } else { 
-                ctx.fillStyle = '#cc0000'; 
-                ctx.fillRect(player.x, player.y, player.width, player.height);
+            let playerDrawY = player.y;
+            if (player && player.currentImage && player.currentImage.complete && player.currentImage.naturalHeight !== 0) { 
+                ctx.drawImage(player.currentImage, player.x, playerDrawY, player.width, player.height);
+            } else if (player) { 
+                ctx.fillStyle = '#cc0000'; ctx.fillRect(player.x, playerDrawY, player.width, player.height);
             }
 
-            if (isDamaged && images.damage) {
-                const elapsed = Date.now() - damageFlashStart;
-                if (elapsed < DAMAGE_FLASH_DURATION) {
-                    if (Math.floor(elapsed / DAMAGE_BLINK_INTERVAL) % 2 === 0) {
+            if (isDamaged && images.damage) { 
+                const elapsedSinceDamage = Date.now() - damageFlashStart;
+                if (elapsedSinceDamage < DAMAGE_FLASH_DURATION) { 
+                    if (Math.floor(elapsedSinceDamage / DAMAGE_BLINK_INTERVAL) % 2 === 0) {
                         if (images.damage.complete && images.damage.naturalHeight !== 0) {
                              ctx.drawImage(images.damage, player.x, player.y, player.width, player.height);
                         } else { 
-                            ctx.fillStyle = 'rgba(255,0,0,0.7)'; 
-                            ctx.fillRect(player.x, player.y, player.width, player.height);
+                            ctx.fillStyle = 'rgba(255,0,0,0.7)'; ctx.fillRect(player.x, player.y, player.width, player.height);
                         }
                     }
+                } else if (gameState === 'gameOver') { 
+                     if (images.damage.complete && images.damage.naturalHeight !== 0) {
+                        ctx.drawImage(images.damage, player.x, player.y, player.width, player.height);
+                     } else {
+                        ctx.fillStyle = 'rgba(255,0,0,0.7)'; ctx.fillRect(player.x, player.y, player.width, player.height);
+                     }
                 }
             }
 
             obstacles.forEach(obs => {
                 if (obs.image && obs.image.complete && obs.image.naturalHeight !== 0) {
-                    ctx.save();
-                    ctx.translate(obs.x + obs.width / 2, obs.y + obs.height / 2); 
-                    ctx.rotate(obs.angle);
-                    ctx.drawImage(obs.image, -obs.width / 2, -obs.height / 2, obs.width, obs.height); 
+                    ctx.save(); ctx.translate(obs.x + obs.width / 2, obs.y + obs.height / 2); 
+                    ctx.rotate(obs.angle); ctx.drawImage(obs.image, -obs.width / 2, -obs.height / 2, obs.width, obs.height); 
                     ctx.restore();
                 } else { 
-                    ctx.save();
-                    ctx.translate(obs.x + obs.width / 2, obs.y + obs.height / 2);
-                    ctx.rotate(obs.angle);
-                    ctx.fillStyle = '#888888'; 
+                    ctx.save(); ctx.translate(obs.x + obs.width / 2, obs.y + obs.height / 2);
+                    ctx.rotate(obs.angle); ctx.fillStyle = '#888888'; 
                     ctx.fillRect(-obs.width / 2, -obs.height / 2, obs.width, obs.height); 
                     ctx.restore();
                 }
             });
-
             drawGround();
+        }
+
+        function drawGameOverScreen() {
+            drawPlayingScreen(); 
+
+            if (Date.now() - damageFlashStart > DAMAGE_FLASH_DURATION) {
+                ctx.fillStyle = "red";
+                ctx.font = "bold 96px 'Arial', sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("GAME OVER", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+            }
+
+            if (Date.now() - gameOverTransitionTimer > GAME_OVER_TEXT_DISPLAY_DURATION + DAMAGE_FLASH_DURATION) {
+                gameState = 'title';
+                demoPlayer.x = -PLAYER_WIDTH;
+                demoPlayer.speed = DEMO_PLAYER_MIN_SPEED + Math.random() * (DEMO_PLAYER_MAX_SPEED - DEMO_PLAYER_MIN_SPEED);
+                demoPlayer.currentImage = images.player1;
+                demoPlayer.imageToggle = false;
+                demoPlayerAnimationTimer = 0;
+            }
         }
 
         // --- Game Loop ---
         let gameLoopRequestId;
         function gameLoop() {
-            if (!gameOver) {
-                spawnObstacles();
-                updateObstacles();
-                checkCollisions();
+            if (gameState === 'playing') {
+                if (!isCelebrating) { 
+                    updateDifficultyBasedOnTime(); 
+                    spawnObstacles();
+                    updateObstacles();
+                    checkCollisions();
+                }
+                drawPlayingScreen();
+            } else if (gameState === 'title') {
+                drawTitleScreen();
+            } else if (gameState === 'gameOver') {
+                drawGameOverScreen();
             }
-            
-            draw();
             
             gameLoopRequestId = requestAnimationFrame(gameLoop);
         }
 
         // --- Event Listeners ---
         document.addEventListener('keydown', function(e) {
-            if (gameOver) return;
-
-            if (e.key === 'ArrowLeft') {
-                movePlayer(-1);
-            } else if (e.key === 'ArrowRight') {
-                movePlayer(1);
+            if (gameState === 'title') {
+                initGame(); 
+            } else if (gameState === 'playing') {
+                if (isCelebrating) return; 
+                if (e.key === 'ArrowLeft') {
+                    movePlayer(-1);
+                } else if (e.key === 'ArrowRight') {
+                    movePlayer(1);
+                }
             }
         });
 
