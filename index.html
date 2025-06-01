@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helmet Game Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #333; /* Darker page background for contrast */
+            margin: 0;
+            color: #fff; /* Default text color to white for dark background */
+        }
+        #game-container {
+            background-color: #1a1a1a; /* Dark container background */
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5); /* Adjusted shadow for dark theme */
+            text-align: center;
+        }
+        #gameCanvas {
+            border: 1px solid #444; /* Darker border for canvas */
+            background-color: #000000; /* Canvas background to black */
+            border-radius: 4px;
+            display: block;
+            margin: 0 auto;
+        }
+        #score {
+            font-size: 1.8em; /* Slightly larger score text */
+            margin-bottom: 15px; /* More space below score */
+            font-weight: bold;
+            color: #e0e0e0; /* Lighter text for score */
+        }
+        #gameOverMessage {
+            margin-top: 20px; /* More space above game over message */
+            font-size: 1.5em; /* Larger game over text */
+            color: #ff4444; /* Brighter red for game over */
+            font-weight: bold;
+        }
+        #gameOverMessage button {
+            margin-top: 15px; /* More space above button */
+            padding: 12px 24px; /* Larger button */
+            font-size: 1.1em; /* Larger button text */
+            color: white;
+            background-color: #007bff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        #gameOverMessage button:hover {
+            background-color: #0056b3;
+        }
+        .instructions {
+            margin-top: 20px; /* More space above instructions */
+            font-size: 1em; /* Slightly larger instructions text */
+            color: #bbb; /* Lighter grey for instructions */
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="score">スコア: 0</div>
+        <canvas id="gameCanvas"></canvas>
+        <div id="gameOverMessage" style="display:none;">
+            ゲームオーバー!
+            <button id="restartButton">リスタート</button>
+        </div>
+        <div class="instructions">
+            矢印キー (← →) で移動
+        </div>
+    </div>
+
+    <script>
+        // --- Game Configuration ---
+        const CANVAS_WIDTH = 840; 
+        const CANVAS_HEIGHT = 480; 
+        const LANE_WIDTH = CANVAS_WIDTH / 7;
+
+        const PLAYER_WIDTH = 70; 
+        const PLAYER_HEIGHT = 100; 
+        const PLAYER_Y_OFFSET = 5; // Adjusted offset from the ground line base
+
+        const OBSTACLE_WIDTH = 80; 
+        const OBSTACLE_HEIGHT = 80; 
+        const OBSTACLE_ROTATION_SPEED = 0.04; 
+        const OBSTACLE_SPEED_VARIATION = 0.2; // Max 20% variation (+/- 10%)
+
+        const HOUSE_WIDTH = 100; 
+        const HOUSE_HEIGHT = 140; 
+
+        const GROUND_LINE_BASE_Y = CANVAS_HEIGHT - 15; // Base Y for ground line, slightly higher
+        const GROUND_LINE_AMPLITUDE = 4; 
+        const GROUND_LINE_SEGMENT_LENGTH = 25; 
+
+        const IMAGE_BASE_URL = "https://raw.githubusercontent.com/keigox68000/HellBent/refs/heads/main/";
+        const IMAGE_SOURCES = {
+            startHouse: "s.png",
+            goalHouse: "g.png",
+            obstacle1: "o1.png",
+            obstacle2: "o2.png",
+            obstacle3: "o3.png",
+            obstacle4: "o4.png",
+            obstacle5: "o5.png",
+            player1: "p1.png",
+            player2: "p2.png",
+            damage: "d.png"
+        };
+        const PLACEHOLDER_URL = "https://placehold.co/";
+
+        // --- Game State Variables ---
+        let canvas, ctx;
+        let score;
+        let gameOver;
+        let player;
+        let obstacles;
+        let images = {};
+        let imagesLoaded = 0;
+        let totalImages = Object.keys(IMAGE_SOURCES).length;
+
+        let playerPositionsX = []; 
+        let groundLinePoints = []; // To store the static ground line points
+
+        let baseObstacleSpeed;
+        let currentObstacleSpeed; // This will be the base for individual speeds
+        let baseSpawnInterval;
+        let currentSpawnInterval;
+        let lastSpawnTime;
+        let minSpawnInterval = 350; 
+        let maxSimultaneousSpawns;
+
+        let isDamaged;
+        let damageFlashStart;
+        const DAMAGE_FLASH_DURATION = 1000; 
+        const DAMAGE_BLINK_INTERVAL = 100; 
+
+        // --- Initialization ---
+        window.onload = function() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            canvas.width = CANVAS_WIDTH;
+            canvas.height = CANVAS_HEIGHT;
+
+            document.getElementById('restartButton').addEventListener('click', initGame);
+            
+            for (let i = 0; i < 7; i++) {
+                const laneCenterX = (i * LANE_WIDTH) + (LANE_WIDTH / 2);
+                playerPositionsX.push(laneCenterX - PLAYER_WIDTH / 2);
+            }
+            
+            loadImages();
+        };
+
+        function generateStaticGroundLine() {
+            groundLinePoints = [];
+            groundLinePoints.push({ x: 0, y: GROUND_LINE_BASE_Y + (Math.random() * GROUND_LINE_AMPLITUDE * 2) - GROUND_LINE_AMPLITUDE });
+            for (let x = GROUND_LINE_SEGMENT_LENGTH; x < CANVAS_WIDTH; x += GROUND_LINE_SEGMENT_LENGTH) {
+                const randomYOffset = (Math.random() * GROUND_LINE_AMPLITUDE * 2) - GROUND_LINE_AMPLITUDE;
+                groundLinePoints.push({ x: x, y: GROUND_LINE_BASE_Y + randomYOffset });
+            }
+            groundLinePoints.push({ x: CANVAS_WIDTH, y: GROUND_LINE_BASE_Y + (Math.random() * GROUND_LINE_AMPLITUDE * 2) - GROUND_LINE_AMPLITUDE });
+        }
+
+        function loadImages() {
+            for (const key in IMAGE_SOURCES) {
+                images[key] = new Image();
+                images[key].onload = () => {
+                    imagesLoaded++;
+                    if (imagesLoaded === totalImages) {
+                        initGame(); 
+                    }
+                };
+                images[key].onerror = function() {
+                    console.warn(`Failed to load image: ${IMAGE_SOURCES[key]}. Using placeholder.`);
+                    let w = PLAYER_WIDTH, h = PLAYER_HEIGHT; 
+                    if (key.includes("House")) { w = HOUSE_WIDTH; h = HOUSE_HEIGHT; }
+                    else if (key.includes("obstacle")) { w = OBSTACLE_WIDTH; h = OBSTACLE_HEIGHT; } 
+                    
+                    this.src = `${PLACEHOLDER_URL}${w}x${h}/000000/ffffff?text=${key.substring(0,1).toUpperCase()}`; 
+                    imagesLoaded++; 
+                    if (imagesLoaded === totalImages) {
+                        initGame();
+                    }
+                };
+                images[key].src = IMAGE_BASE_URL + IMAGE_SOURCES[key];
+            }
+        }
+
+        function initGame() {
+            score = 0;
+            gameOver = false;
+            isDamaged = false;
+            document.getElementById('score').textContent = 'スコア: 0';
+            document.getElementById('gameOverMessage').style.display = 'none';
+
+            generateStaticGroundLine(); // Generate ground line once
+
+            player = {
+                positionIndex: 0, 
+                x: playerPositionsX[0],
+                // Player Y position is set relative to the ground's base Y
+                y: GROUND_LINE_BASE_Y - PLAYER_HEIGHT - PLAYER_Y_OFFSET, 
+                width: PLAYER_WIDTH,
+                height: PLAYER_HEIGHT,
+                imageToggle: false, 
+                currentImage: images.player1
+            };
+
+            obstacles = [];
+            baseObstacleSpeed = 2.0; 
+            currentObstacleSpeed = baseObstacleSpeed; // This is the *base* for varied speeds
+            baseSpawnInterval = 1700; 
+            currentSpawnInterval = baseSpawnInterval;
+            lastSpawnTime = 0;
+            maxSimultaneousSpawns = 1;
+
+            if (gameLoopRequestId) { 
+                cancelAnimationFrame(gameLoopRequestId);
+            }
+            gameLoop();
+        }
+
+        // --- Player Logic ---
+        function movePlayer(direction) {
+            if (gameOver) return;
+
+            const newPosIndex = player.positionIndex + direction;
+            if (newPosIndex >= 0 && newPosIndex < 7) {
+                player.positionIndex = newPosIndex;
+                player.x = playerPositionsX[player.positionIndex];
+                player.imageToggle = !player.imageToggle;
+                player.currentImage = player.imageToggle ? images.player2 : images.player1;
+
+                if (player.positionIndex === 6) {
+                    score++;
+                    document.getElementById('score').textContent = 'スコア: ' + score;
+                    player.positionIndex = 0; 
+                    player.x = playerPositionsX[0];
+                    
+                    // currentObstacleSpeed still increases, affecting the base for new obstacles
+                    currentObstacleSpeed = baseObstacleSpeed + (score * 0.2); 
+                    currentSpawnInterval = Math.max(minSpawnInterval, baseSpawnInterval - (score * 70)); 
+                    if (score > 0 && score % 3 === 0) { 
+                        maxSimultaneousSpawns = Math.min(4, maxSimultaneousSpawns + 1); 
+                    }
+                }
+            }
+        }
+
+        // --- Obstacle Logic ---
+        function spawnObstacles() {
+            const now = Date.now();
+            if (now - lastSpawnTime > currentSpawnInterval) {
+                lastSpawnTime = now;
+
+                let spawnedThisTick = 0;
+                const lanesAttempted = new Set(); 
+
+                for (let i = 0; i < maxSimultaneousSpawns; i++) {
+                    if (spawnedThisTick >= maxSimultaneousSpawns) break;
+
+                    const obstacleLanePlayerIndex = 1 + Math.floor(Math.random() * 5); 
+                    if (lanesAttempted.has(obstacleLanePlayerIndex)) continue; 
+
+                    lanesAttempted.add(obstacleLanePlayerIndex);
+                    
+                    const obstacleImageKey = `obstacle${obstacleLanePlayerIndex}`;
+                    const obstacleImage = images[obstacleImageKey];
+                                        
+                    const obstacleX = playerPositionsX[obstacleLanePlayerIndex] + (PLAYER_WIDTH / 2) - (OBSTACLE_WIDTH / 2);
+                    
+                    // Assign individual speed with variation
+                    const speedMultiplier = 1 + (Math.random() - 0.5) * OBSTACLE_SPEED_VARIATION;
+                    const individualSpeed = currentObstacleSpeed * speedMultiplier;
+
+                    obstacles.push({
+                        x: obstacleX,
+                        y: -OBSTACLE_HEIGHT, 
+                        width: OBSTACLE_WIDTH, 
+                        height: OBSTACLE_HEIGHT, 
+                        image: obstacleImage,
+                        angle: 0,
+                        laneIndex: obstacleLanePlayerIndex,
+                        speed: individualSpeed // Store individual speed
+                    });
+                    spawnedThisTick++;
+                }
+            }
+        }
+
+        function updateObstacles() {
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obs = obstacles[i];
+                obs.y += obs.speed; // Use individual speed
+                obs.angle += OBSTACLE_ROTATION_SPEED;
+
+                if (obs.y > CANVAS_HEIGHT) {
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- Collision Detection ---
+        function checkCollisions() {
+            for (const obs of obstacles) {
+                const playerLeft = player.x;
+                const playerRight = player.x + player.width;
+                const playerTop = player.y;
+                const playerBottom = player.y + player.height;
+
+                const obsLeft = obs.x;
+                const obsRight = obs.x + obs.width; 
+                const obsTop = obs.y;
+                const obsBottom = obs.y + obs.height; 
+
+                if (playerRight > obsLeft && playerLeft < obsRight &&
+                    playerBottom > obsTop && playerTop < obsBottom) {
+                    
+                    if (obs.laneIndex === player.positionIndex) {
+                        gameOver = true;
+                        isDamaged = true;
+                        damageFlashStart = Date.now();
+                        document.getElementById('gameOverMessage').style.display = 'block';
+                        return; 
+                    }
+                }
+            }
+        }
+        
+        // --- Drawing Ground ---
+        function drawGround() {
+            if (groundLinePoints.length === 0) return; // Don't draw if not generated
+
+            ctx.beginPath();
+            ctx.moveTo(groundLinePoints[0].x, groundLinePoints[0].y);
+            for (let i = 1; i < groundLinePoints.length; i++) {
+                ctx.lineTo(groundLinePoints[i].x, groundLinePoints[i].y);
+            }
+            ctx.strokeStyle = '#555555'; 
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+
+        // --- Drawing ---
+        function draw() {
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            const startHouseX = playerPositionsX[0] + (PLAYER_WIDTH / 2) - (HOUSE_WIDTH / 2);
+            const startHouseY = GROUND_LINE_BASE_Y - HOUSE_HEIGHT; // Position relative to base ground line
+            if (images.startHouse && images.startHouse.complete && images.startHouse.naturalHeight !== 0) {
+                 ctx.drawImage(images.startHouse, startHouseX, startHouseY, HOUSE_WIDTH, HOUSE_HEIGHT);
+            } else {
+                ctx.fillStyle = 'darkgreen'; 
+                ctx.fillRect(startHouseX, startHouseY, HOUSE_WIDTH, HOUSE_HEIGHT);
+                ctx.fillStyle = 'white';
+                ctx.fillText("S", startHouseX + HOUSE_WIDTH/2 - 10, startHouseY + HOUSE_HEIGHT/2 + 10); 
+            }
+
+            const goalHouseX = playerPositionsX[6] + (PLAYER_WIDTH / 2) - (HOUSE_WIDTH / 2);
+            const goalHouseY = GROUND_LINE_BASE_Y - HOUSE_HEIGHT; // Position relative to base ground line
+             if (images.goalHouse && images.goalHouse.complete && images.goalHouse.naturalHeight !== 0) {
+                ctx.drawImage(images.goalHouse, goalHouseX, goalHouseY, HOUSE_WIDTH, HOUSE_HEIGHT);
+            } else {
+                ctx.fillStyle = 'darkblue'; 
+                ctx.fillRect(goalHouseX, goalHouseY, HOUSE_WIDTH, HOUSE_HEIGHT);
+                ctx.fillStyle = 'white';
+                ctx.fillText("G", goalHouseX + HOUSE_WIDTH/2 - 10, goalHouseY + HOUSE_HEIGHT/2 + 10); 
+            }
+            
+            // Player Y is set in initGame and doesn't need per-frame adjustment if ground is static
+            // player.y = GROUND_LINE_BASE_Y - PLAYER_HEIGHT - PLAYER_Y_OFFSET; 
+
+            if (player.currentImage && player.currentImage.complete && player.currentImage.naturalHeight !== 0) {
+                ctx.drawImage(player.currentImage, player.x, player.y, player.width, player.height);
+            } else { 
+                ctx.fillStyle = '#cc0000'; 
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+            }
+
+            if (isDamaged && images.damage) {
+                const elapsed = Date.now() - damageFlashStart;
+                if (elapsed < DAMAGE_FLASH_DURATION) {
+                    if (Math.floor(elapsed / DAMAGE_BLINK_INTERVAL) % 2 === 0) {
+                        if (images.damage.complete && images.damage.naturalHeight !== 0) {
+                             ctx.drawImage(images.damage, player.x, player.y, player.width, player.height);
+                        } else { 
+                            ctx.fillStyle = 'rgba(255,0,0,0.7)'; 
+                            ctx.fillRect(player.x, player.y, player.width, player.height);
+                        }
+                    }
+                }
+            }
+
+            obstacles.forEach(obs => {
+                if (obs.image && obs.image.complete && obs.image.naturalHeight !== 0) {
+                    ctx.save();
+                    ctx.translate(obs.x + obs.width / 2, obs.y + obs.height / 2); 
+                    ctx.rotate(obs.angle);
+                    ctx.drawImage(obs.image, -obs.width / 2, -obs.height / 2, obs.width, obs.height); 
+                    ctx.restore();
+                } else { 
+                    ctx.save();
+                    ctx.translate(obs.x + obs.width / 2, obs.y + obs.height / 2);
+                    ctx.rotate(obs.angle);
+                    ctx.fillStyle = '#888888'; 
+                    ctx.fillRect(-obs.width / 2, -obs.height / 2, obs.width, obs.height); 
+                    ctx.restore();
+                }
+            });
+
+            drawGround();
+        }
+
+        // --- Game Loop ---
+        let gameLoopRequestId;
+        function gameLoop() {
+            if (!gameOver) {
+                spawnObstacles();
+                updateObstacles();
+                checkCollisions();
+            }
+            
+            draw();
+            
+            gameLoopRequestId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Event Listeners ---
+        document.addEventListener('keydown', function(e) {
+            if (gameOver) return;
+
+            if (e.key === 'ArrowLeft') {
+                movePlayer(-1);
+            } else if (e.key === 'ArrowRight') {
+                movePlayer(1);
+            }
+        });
+
+    </script>
+</body>
+</html>
